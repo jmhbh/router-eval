@@ -107,6 +107,7 @@ func (s *Store) UpdateIndex(manifest Manifest, metrics Metrics) error {
 		Summary: RunCatalogSummary{
 			TotalCostUSD:       metrics.Comparable.TotalCostUSD,
 			TotalCostKnown:     metrics.Comparable.TotalCostKnown,
+			TTFBP50Millis:      metrics.Comparable.TTFBP50Millis,
 			TTFTP50Millis:      metrics.Comparable.TTFTP50Millis,
 			E2EP50Millis:       metrics.Comparable.E2EP50Millis,
 			E2EP95Millis:       metrics.Comparable.E2EP95Millis,
@@ -252,39 +253,29 @@ func buildProbeGroups(runs []RunCatalog) []ProbeRouterGroup {
 	groups := make([]ProbeRouterGroup, 0, len(routerNames))
 	for _, router := range routerNames {
 		routerRuns := byRouter[router]
-		byType := map[string][]RunCatalog{}
+		// Probes are grouped directly by probe name under each router. Each probe type
+		// is measured separately and never blended into a cross-probe-type aggregate,
+		// since mixing (for example) a non-streaming floor probe with a streaming one
+		// produces a meaningless E2E/latency rollup.
+		byProbe := map[string][]RunCatalog{}
 		for _, run := range routerRuns {
-			byType[probeWorkloadType(run)] = append(byType[probeWorkloadType(run)], run)
+			byProbe[run.Workload.Name] = append(byProbe[run.Workload.Name], run)
 		}
-		typeNames := sortedKeys(byType)
-		workloads := make([]ProbeWorkloadGroup, 0, len(typeNames))
-		for _, typeName := range typeNames {
-			workloadRuns := byType[typeName]
-			byProbe := map[string][]RunCatalog{}
-			for _, run := range workloadRuns {
-				byProbe[run.Workload.Name] = append(byProbe[run.Workload.Name], run)
-			}
-			probeNames := sortedKeys(byProbe)
-			probes := make([]ProbeRunGroup, 0, len(probeNames))
-			for _, probeName := range probeNames {
-				probeRuns := byProbe[probeName]
-				sortRuns(probeRuns)
-				probes = append(probes, ProbeRunGroup{
-					Name:    probeName,
-					Runs:    probeRuns,
-					Summary: summarizeRuns(probeRuns),
-				})
-			}
-			workloads = append(workloads, ProbeWorkloadGroup{
-				Type:    typeName,
-				Summary: summarizeRuns(workloadRuns),
-				Probes:  probes,
+		probeNames := sortedKeys(byProbe)
+		probeGroups := make([]ProbeRunGroup, 0, len(probeNames))
+		for _, probeName := range probeNames {
+			probeRuns := byProbe[probeName]
+			sortRuns(probeRuns)
+			probeGroups = append(probeGroups, ProbeRunGroup{
+				Name:    probeName,
+				Runs:    probeRuns,
+				Summary: summarizeRuns(probeRuns),
 			})
 		}
 		groups = append(groups, ProbeRouterGroup{
-			Router:    router,
-			Summary:   summarizeRuns(routerRuns),
-			Workloads: workloads,
+			Router:  router,
+			Summary: summarizeRuns(routerRuns),
+			Probes:  probeGroups,
 		})
 	}
 	return groups
@@ -336,21 +327,15 @@ func buildHarnessGroups(runs []RunCatalog) []HarnessGroup {
 				Tasks:   tasks,
 			})
 		}
+		// The harness level (for example "codex") deliberately carries no rollup of its
+		// own: it spans multiple routers, so an aggregate there would compare nothing.
+		// The per-router summary below is the comparison unit.
 		groups = append(groups, HarnessGroup{
 			Harness: harness,
-			Summary: summarizeRuns(harnessRuns),
-			Runs:    harnessRuns,
 			Routers: routers,
 		})
 	}
 	return groups
-}
-
-func probeWorkloadType(run RunCatalog) string {
-	if strings.Contains(run.Workload.Name, "multi") {
-		return "multi"
-	}
-	return "single"
 }
 
 func summarizeRuns(runs []RunCatalog) AggregateSummary {
@@ -371,6 +356,7 @@ func summarizeRuns(runs []RunCatalog) AggregateSummary {
 			w = 1
 		}
 		weight += w
+		summary.TTFBP50Millis += s.TTFBP50Millis * float64(w)
 		summary.TTFTP50Millis += s.TTFTP50Millis * float64(w)
 		summary.E2EP50Millis += s.E2EP50Millis * float64(w)
 		summary.E2EP95Millis += s.E2EP95Millis * float64(w)
@@ -378,6 +364,7 @@ func summarizeRuns(runs []RunCatalog) AggregateSummary {
 		summary.SuccessRate += s.SuccessRate * float64(w)
 	}
 	if weight > 0 {
+		summary.TTFBP50Millis /= float64(weight)
 		summary.TTFTP50Millis /= float64(weight)
 		summary.E2EP50Millis /= float64(weight)
 		summary.E2EP95Millis /= float64(weight)

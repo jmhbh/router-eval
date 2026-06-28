@@ -66,6 +66,7 @@ func PrepareHome(parentDir string, config Config) (Home, error) {
 	return Home{Path: home, ConfigPath: configPath}, nil
 }
 
+// renderConfig renders the Codex config to use our local proxy
 func renderConfig(config Config) string {
 	return fmt.Sprintf(`model = %q
 model_provider = "local_proxy"
@@ -161,6 +162,10 @@ func Run(ctx context.Context, config Config, runner CommandRunner) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
+	// CODEX_HOME is per-run and isolated; codex fills it with sqlite state, sessions,
+	// and a plugins clone (tens of MB). Remove it once the subprocess has exited —
+	// stdout/stderr are persisted to OutDir below, so nothing measured is lost.
+	defer os.RemoveAll(home.Path)
 
 	runCtx, cancel := context.WithTimeout(ctx, config.Timeout)
 	defer cancel()

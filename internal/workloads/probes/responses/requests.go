@@ -2,7 +2,6 @@ package responses
 
 import (
 	"fmt"
-	"strings"
 
 	"router-eval/internal/workloads/probes"
 )
@@ -22,52 +21,16 @@ func Request(name, model string) (probes.Request, error) {
 				"stream": false,
 			},
 		}, nil
-	case "long_context":
-		return probes.Request{
-			Name:     name,
-			Endpoint: "/v1/responses",
-			Payload: map[string]any{
-				"model":  model,
-				"input":  longContextInput(),
-				"stream": false,
-			},
-		}, nil
 	case "streaming_responses":
 		return probes.Request{
 			Name:     name,
 			Endpoint: "/v1/responses",
 			Stream:   true,
 			Payload: map[string]any{
-				"model":  model,
-				"input":  "Write 8 concise bullet points about streamed response measurement.",
-				"stream": true,
-			},
-		}, nil
-	case "structured_tool_call":
-		return probes.Request{
-			Name:     name,
-			Endpoint: "/v1/responses",
-			Payload: map[string]any{
-				"model": model,
-				"input": "Call the record_latency tool with ttft_ms=123 and e2e_ms=456.",
-				"tools": []map[string]any{recordLatencyTool()},
-				"tool_choice": map[string]any{
-					"type": "function",
-					"name": "record_latency",
-				},
-				"stream": true,
-			},
-		}, nil
-	case "parallel_tool_call":
-		return probes.Request{
-			Name:     name,
-			Endpoint: "/v1/responses",
-			Payload: map[string]any{
-				"model":               model,
-				"input":               "Call both record_latency and record_cost with plausible numeric values.",
-				"tools":               []map[string]any{recordLatencyTool(), recordCostTool()},
-				"parallel_tool_calls": true,
-				"stream":              true,
+				"model":             model,
+				"input":             streamingThroughputInput(),
+				"stream":            true,
+				"max_output_tokens": 512,
 			},
 		}, nil
 	default:
@@ -75,49 +38,16 @@ func Request(name, model string) (probes.Request, error) {
 	}
 }
 
-// longContextInput builds a large, deterministic prompt with a single needle so
-// the expected answer is objectively checkable while the request stresses request
-// size, context handling, and the cost path.
-func longContextInput() string {
-	var b strings.Builder
-	b.WriteString("You are given a long document. Find the line containing MAGIC_TOKEN and reply with only the number that follows it.\n\n")
-	for i := 0; i < 400; i++ {
-		fmt.Fprintf(&b, "line %d: the quick brown fox jumps over the lazy dog; filler filler filler filler\n", i)
-		if i == 237 {
-			b.WriteString("MAGIC_TOKEN: 8675309\n")
-		}
-	}
-	b.WriteString("\nWhat number follows MAGIC_TOKEN? Reply with just the number.")
-	return b.String()
-}
-
-func recordLatencyTool() map[string]any {
-	return map[string]any{
-		"type":        "function",
-		"name":        "record_latency",
-		"description": "Record latency measurements.",
-		"parameters": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"ttft_ms": map[string]any{"type": "number"},
-				"e2e_ms":  map[string]any{"type": "number"},
-			},
-			"required": []string{"ttft_ms", "e2e_ms"},
-		},
-	}
-}
-
-func recordCostTool() map[string]any {
-	return map[string]any{
-		"type":        "function",
-		"name":        "record_cost",
-		"description": "Record request cost.",
-		"parameters": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"cost_usd": map[string]any{"type": "number"},
-			},
-			"required": []string{"cost_usd"},
-		},
-	}
+// streamingThroughputInput keeps the input small (so TTFT reflects router connect +
+// first-token latency, not prefill) while asking for far more output than the probe's
+// max_output_tokens cap allows. The cap therefore binds on every run, so each run emits
+// the same number of output tokens and tokens/sec is measured over a stable, comparable
+// streaming window instead of a short, model-discretionary one.
+func streamingThroughputInput() string {
+	return "Write a detailed, continuous technical explanation of at least 900 words " +
+		"describing how large language model APIs stream responses token by token over " +
+		"server-sent events: connection setup, chunked transfer encoding, per-token " +
+		"cadence, client-side buffering, and backpressure. Use flowing prose in full " +
+		"paragraphs with no lists or headings, and keep writing until every aspect is " +
+		"thoroughly covered."
 }

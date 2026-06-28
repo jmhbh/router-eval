@@ -130,10 +130,10 @@ func TestBuildUIAggregateGroupsProbesAndHarnesses(t *testing.T) {
 	if len(aggregate.Probes) != 2 {
 		t.Fatalf("probe groups=%+v", aggregate.Probes)
 	}
-	if aggregate.Probes[0].Router != "openrouter" || aggregate.Probes[0].Workloads[0].Type != "single" {
+	if aggregate.Probes[0].Router != "openrouter" || aggregate.Probes[0].Probes[0].Name != "basic_responses" {
 		t.Fatalf("openrouter group=%+v", aggregate.Probes[0])
 	}
-	if aggregate.Probes[1].Router != "tokenrouter" || aggregate.Probes[1].Workloads[0].Type != "multi" {
+	if aggregate.Probes[1].Router != "tokenrouter" || aggregate.Probes[1].Probes[0].Name != "multi_latency" {
 		t.Fatalf("tokenrouter group=%+v", aggregate.Probes[1])
 	}
 	if len(aggregate.Harnesses) != 1 || aggregate.Harnesses[0].Harness != "codex" {

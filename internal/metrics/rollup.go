@@ -12,6 +12,7 @@ import (
 )
 
 func FromRequests(runID string, records []artifacts.RequestRecord) artifacts.Metrics {
+	var ttfbs []float64
 	var ttfts []float64
 	var e2es []float64
 	var totalRequestMillis float64
@@ -25,6 +26,9 @@ func FromRequests(runID string, records []artifacts.RequestRecord) artifacts.Met
 	errorClasses := map[string]int{}
 
 	for _, record := range records {
+		if record.Timing.TTFBMillis > 0 {
+			ttfbs = append(ttfbs, record.Timing.TTFBMillis)
+		}
 		if record.Timing.TTFTMillis > 0 {
 			ttfts = append(ttfts, record.Timing.TTFTMillis)
 		}
@@ -70,6 +74,7 @@ func FromRequests(runID string, records []artifacts.RequestRecord) artifacts.Met
 			TotalCostKnown:           costSamples > 0,
 			CostSampleCount:          costSamples,
 			CostPerSuccessfulRequest: costPerSuccess,
+			TTFBP50Millis:            percentile(ttfbs, 0.50),
 			TTFTP50Millis:            percentile(ttfts, 0.50),
 			E2EP50Millis:             percentile(e2es, 0.50),
 			E2EP95Millis:             percentile(e2es, 0.95),
