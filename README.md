@@ -1,16 +1,11 @@
 # router-eval
 
-CLI plus transparent local measurement proxy for evaluating hosted LLM
-aggregators on cost, performance, and reliability using a harness.
+CLI and transparent measurement proxy for capturing LLM router request metrics — cost, latency, and reliability — via synthetic probes and a Codex harness.
 
 ## Prerequisites
 
-- A tokenRouter account and API key. For Codex setup background, see:
-  https://www.tokenrouter.com/docs/set-up-tokenrouter-in-codex
-- An OpenRouter account and API key. For Codex CLI setup background, see:
-  https://openrouter.ai/docs/cookbook/coding-agents/codex-cli
-- Codex CLI installed when running the Codex harness.
 - Install the latest CLI release (auto-detects OS/arch): `curl -fsSL https://raw.githubusercontent.com/jmhbh/router-eval/main/install.sh | sh`
+- Codex CLI installed when running the Codex harness.
 
 Run the `validate` cmd to ensure necessary environment variables are set.
 
@@ -84,7 +79,8 @@ router-eval codex \
   --task create-snake-game \
   --sandbox workspace-write \
   --approval never \
-  --prompt "$(cat snake_prompt.txt)"
+  --prompt "$(cat sample_codex_prompts/snake_prompt_easy.txt)"
+  --samples 1
 ```
 
 Measure metrics for creating the classic game snake using Codex through TokenRouter:
@@ -97,7 +93,8 @@ router-eval codex \
   --task create-snake-game \
   --sandbox workspace-write \
   --approval never \
-  --prompt "$(cat snake_prompt.txt)" \
+  --prompt "$(cat sample_codex_prompts/snake_prompt_easy.txt)" \
+  -- samples 1
 ```
 
 The harness creates a temporary `CODEX_HOME` which is cleaned up after every run.
@@ -115,15 +112,3 @@ Serve the local dashboard in the foreground (defaults to port 8080):
 ```sh
 bin/router-eval ui-serve
 ```
-
-## Manual Cost Reconciliation for Codex tasks (OpenRouter only)
-
-Costs metrics are automatically gathered and reconciled when using token router when running the
-`codex` cmd. When using openrouter cost reconiliation **may** need to be performed manually via
-the following cli command using the exported usage logs CSV on the OpenRouter dashboard **in UTC** if cost is not returned in the streaming response.
-
-```sh
-router-eval reconcile --run-id <RUN_ID> --out out --csv openrouter_activity.csv
-```
-
-`RUN_ID` can be found in the `out` directory.
