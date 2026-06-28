@@ -1,0 +1,35 @@
+Create a small but feature-rich Snake game as a set of plain static files in the
+current working directory grouped under a new directory. Split the code across separate files so the structure is
+clean and each part has a clear home:
+
+- index.html — markup plus an HTML5 <canvas>; link the CSS and JS with plain relative
+  tags (regular <link> and <script>, NOT ES modules).
+- styles.css — all styling.
+- snake.js — all game logic.
+- README.md — one short paragraph on how to run it (open index.html in a browser) and
+  the full list of controls.
+
+Everything must run by opening index.html directly from disk: no build step, no local
+server, and no external scripts, stylesheets, fonts, images, or network requests of any
+kind. Generate any sounds with the Web Audio API rather than audio files.
+
+Game requirements:
+- Distinct game states, each clearly rendered: a start screen, active play, a paused
+  state, and a game-over screen.
+- Controls: Arrow keys and WASD to steer, with no direct 180-degree reversal into the
+  snake's own neck. Space or P pauses and resumes. Enter starts the game and restarts
+  after game over.
+- Food spawns on random empty cells; eating it grows the snake, increases the score,
+  and plays a short eat sound.
+- Progressive difficulty: the snake speeds up in steps as the score climbs, and the
+  current level (or speed) is shown on screen.
+- A few fixed obstacle blocks on the board that end the game on contact, in addition to
+  the walls and the snake's own body.
+- The score is always visible, and a high score persists across sessions via
+  localStorage.
+- On game over: play a game-over sound and show the final score with a restart prompt.
+
+Keep it focused and readable: implement exactly the features listed above and no extras,
+and prefer clear, conventional code over cleverness.
+
+When finished, list the files you created and confirm each filename.
