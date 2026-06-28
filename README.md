@@ -102,4 +102,4 @@ router-eval reconcile --run-id <RUN_ID> --out out --csv openrouter_activity.csv
 Export the OpenRouter activity CSV for a window that covers the run **in UTC**
 (the dashboard typically filters by local time, while the generation second is
 UTC). A reconciliation summary is written to
-`out/runs/<RUN>/reconciliation/summary.json`.
+`out/runs/<RUN_ID>/reconciliation/summary.json`.
