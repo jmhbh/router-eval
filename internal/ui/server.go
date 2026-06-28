@@ -176,6 +176,7 @@ func (s *Server) scanRuns() ([]artifacts.RunCatalog, error) {
 			Summary: artifacts.RunCatalogSummary{
 				TotalCostUSD:       metrics.Comparable.TotalCostUSD,
 				TotalCostKnown:     metrics.Comparable.TotalCostKnown,
+				TTFBP50Millis:      metrics.Comparable.TTFBP50Millis,
 				TTFTP50Millis:      metrics.Comparable.TTFTP50Millis,
 				E2EP50Millis:       metrics.Comparable.E2EP50Millis,
 				E2EP95Millis:       metrics.Comparable.E2EP95Millis,
@@ -200,6 +201,7 @@ func (s *Server) refreshRunSummaries(runs []artifacts.RunCatalog) []artifacts.Ru
 			run.Summary = artifacts.RunCatalogSummary{
 				TotalCostUSD:       runMetrics.Comparable.TotalCostUSD,
 				TotalCostKnown:     runMetrics.Comparable.TotalCostKnown,
+				TTFBP50Millis:      runMetrics.Comparable.TTFBP50Millis,
 				TTFTP50Millis:      runMetrics.Comparable.TTFTP50Millis,
 				E2EP50Millis:       runMetrics.Comparable.E2EP50Millis,
 				E2EP95Millis:       runMetrics.Comparable.E2EP95Millis,

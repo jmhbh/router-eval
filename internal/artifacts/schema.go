@@ -59,11 +59,14 @@ type RequestRecord struct {
 }
 
 type RequestTiming struct {
-	RequestSentUnixNano int64   `json:"request_sent_unix_nano"`
-	FirstByteUnixNano   int64   `json:"first_byte_unix_nano,omitempty"`
-	LastByteUnixNano    int64   `json:"last_byte_unix_nano,omitempty"`
-	TTFTMillis          float64 `json:"ttft_ms,omitempty"`
-	E2EMillis           float64 `json:"e2e_ms,omitempty"`
+	RequestSentUnixNano int64 `json:"request_sent_unix_nano"`
+	FirstByteUnixNano   int64 `json:"first_byte_unix_nano,omitempty"`
+	LastByteUnixNano    int64 `json:"last_byte_unix_nano,omitempty"`
+	// TTFB is the first response byte of any kind; TTFT is the first streamed token
+	// delta and is set only for streaming responses (0 for buffered responses).
+	TTFBMillis float64 `json:"ttfb_ms,omitempty"`
+	TTFTMillis float64 `json:"ttft_ms,omitempty"`
+	E2EMillis  float64 `json:"e2e_ms,omitempty"`
 }
 
 type Usage struct {
@@ -80,6 +83,7 @@ type Usage struct {
 
 type ComparableMetrics struct {
 	CostUSD              float64 `json:"cost_usd,omitempty"`
+	TTFBMillis           float64 `json:"ttfb_ms,omitempty"`
 	TTFTMillis           float64 `json:"ttft_ms,omitempty"`
 	E2EMillis            float64 `json:"e2e_ms,omitempty"`
 	OutputTokensPerSec   float64 `json:"output_tokens_per_sec,omitempty"`
@@ -129,6 +133,7 @@ type RunComparableRollup struct {
 	TotalCostKnown           bool           `json:"total_cost_known,omitempty"`
 	CostSampleCount          int            `json:"cost_sample_count,omitempty"`
 	CostPerSuccessfulRequest float64        `json:"cost_per_successful_request,omitempty"`
+	TTFBP50Millis            float64        `json:"ttfb_p50_ms,omitempty"`
 	TTFTP50Millis            float64        `json:"ttft_p50_ms,omitempty"`
 	E2EP50Millis             float64        `json:"e2e_p50_ms,omitempty"`
 	E2EP95Millis             float64        `json:"e2e_p95_ms,omitempty"`
@@ -168,6 +173,7 @@ type RunCatalog struct {
 type RunCatalogSummary struct {
 	TotalCostUSD       float64 `json:"total_cost_usd,omitempty"`
 	TotalCostKnown     bool    `json:"total_cost_known,omitempty"`
+	TTFBP50Millis      float64 `json:"ttfb_p50_ms,omitempty"`
 	TTFTP50Millis      float64 `json:"ttft_p50_ms,omitempty"`
 	E2EP50Millis       float64 `json:"e2e_p50_ms,omitempty"`
 	E2EP95Millis       float64 `json:"e2e_p95_ms,omitempty"`
@@ -186,13 +192,7 @@ type UIAggregate struct {
 }
 
 type ProbeRouterGroup struct {
-	Router    string               `json:"router"`
-	Summary   AggregateSummary     `json:"summary"`
-	Workloads []ProbeWorkloadGroup `json:"workloads"`
-}
-
-type ProbeWorkloadGroup struct {
-	Type    string           `json:"type"`
+	Router  string           `json:"router"`
 	Summary AggregateSummary `json:"summary"`
 	Probes  []ProbeRunGroup  `json:"probes"`
 }
@@ -205,8 +205,6 @@ type ProbeRunGroup struct {
 
 type HarnessGroup struct {
 	Harness string               `json:"harness"`
-	Summary AggregateSummary     `json:"summary"`
-	Runs    []RunCatalog         `json:"runs,omitempty"`
 	Routers []HarnessRouterGroup `json:"routers"`
 }
 
@@ -227,6 +225,7 @@ type AggregateSummary struct {
 	RequestCount       int     `json:"request_count,omitempty"`
 	TotalCostUSD       float64 `json:"total_cost_usd,omitempty"`
 	TotalCostKnown     bool    `json:"total_cost_known,omitempty"`
+	TTFBP50Millis      float64 `json:"ttfb_p50_ms,omitempty"`
 	TTFTP50Millis      float64 `json:"ttft_p50_ms,omitempty"`
 	E2EP50Millis       float64 `json:"e2e_p50_ms,omitempty"`
 	E2EP95Millis       float64 `json:"e2e_p95_ms,omitempty"`

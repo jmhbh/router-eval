@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -32,6 +33,7 @@ type codexOptions struct {
 	sandbox      string
 	approval     string
 	apiKey       string
+	samples      int
 }
 
 func newCodexCommand() *cobra.Command {
@@ -63,8 +65,18 @@ func newCodexCommand() *cobra.Command {
 	flags.StringVar(&opts.sandbox, "sandbox", "read-only", "Codex sandbox mode")
 	flags.StringVar(&opts.approval, "approval", "never", "Codex approval policy: untrusted, on-request, or never")
 	flags.StringVar(&opts.apiKey, "proxy-key", "local-proxy-key", "throwaway downstream proxy API key")
+	flags.IntVar(&opts.samples, "samples", 1, "number of times to run the task; each sample is a separate run, isolated in its own workdir, aggregated by task in the UI (codex runs are expensive — start small)")
 
 	return cmd
+}
+
+type codexSampleResult struct {
+	runID     string
+	runDir    string
+	requests  int
+	wallMs    float64
+	costUSD   float64
+	costKnown bool
 }
 
 func runCodex(opts codexOptions) error {
@@ -80,21 +92,83 @@ func runCodex(opts codexOptions) error {
 	if opts.prompt == "" {
 		return errors.New("--prompt is required")
 	}
-	if opts.runID == "" {
-		opts.runID = time.Now().UTC().Format("20060102T150405Z")
-	}
-	log.Printf("codex setup: run_id=%s router=%s task=%s", opts.runID, opts.routerName, opts.task)
 
+	samples := opts.samples
+	if samples < 1 {
+		samples = 1
+	}
+	base := opts.runID
+	if base == "" {
+		base = time.Now().UTC().Format("20060102T150405Z")
+	}
+
+	var results []codexSampleResult
+	for i := 0; i < samples; i++ {
+		runID := base
+		workdir := opts.workdir
+		// Each sample is isolated in its own run-id and workdir so a prior sample's
+		// output file does not change the task the next sample sees.
+		if samples > 1 {
+			runID = fmt.Sprintf("%s-%02d", base, i+1)
+			workdir = filepath.Join(opts.workdir, runID)
+			if err := os.MkdirAll(workdir, 0o755); err != nil {
+				return err
+			}
+		}
+		log.Printf("codex sample %d/%d: run_id=%s", i+1, samples, runID)
+		res, err := runCodexOnce(opts, runID, workdir)
+		if err != nil {
+			log.Printf("codex sample %d/%d failed: %v", i+1, samples, err)
+			continue
+		}
+		results = append(results, res)
+	}
+	if len(results) == 0 {
+		return errors.New("all codex samples failed")
+	}
+
+	walls := make([]float64, 0, len(results))
+	var totalCost float64
+	costKnown := true
+	for _, r := range results {
+		walls = append(walls, r.wallMs)
+		totalCost += r.costUSD
+		if !r.costKnown {
+			costKnown = false
+		}
+	}
+	fmt.Printf("codex task=%s samples=%d succeeded=%d wall_ms_median=%.1f cost_total_usd=%.6f cost_known=%t\n",
+		opts.task, samples, len(results), medianFloat(walls), totalCost, costKnown)
+	for _, r := range results {
+		fmt.Printf("  run_id=%s requests=%d wall_ms=%.1f cost_usd=%.6f\n", r.runID, r.requests, r.wallMs, r.costUSD)
+	}
+	return nil
+}
+
+func medianFloat(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	n := len(sorted)
+	if n%2 == 1 {
+		return sorted[n/2]
+	}
+	return (sorted[n/2-1] + sorted[n/2]) / 2
+}
+
+func runCodexOnce(opts codexOptions, runID, workdir string) (codexSampleResult, error) {
 	adapter, err := routers.NewAdapter(opts.routerName)
 	if err != nil {
-		return err
+		return codexSampleResult{}, err
 	}
-	store, err := artifacts.NewStore(opts.outDir, opts.runID)
+	store, err := artifacts.NewStore(opts.outDir, runID)
 	if err != nil {
-		return err
+		return codexSampleResult{}, err
 	}
 	manifest := artifacts.Manifest{
-		RunID:     opts.runID,
+		RunID:     runID,
 		Router:    adapter.Name(),
 		Model:     opts.model,
 		Workload:  artifacts.WorkloadRef{Kind: "harness/codex", Name: opts.task},
@@ -102,29 +176,29 @@ func runCodex(opts codexOptions) error {
 		StartedAt: time.Now().UTC(),
 		Config: map[string]string{
 			"upstream": opts.upstream,
-			"workdir":  opts.workdir,
+			"workdir":  workdir,
 			"sandbox":  opts.sandbox,
 			"approval": opts.approval,
 		},
 	}
 	if err := store.WriteManifest(manifest); err != nil {
-		return err
+		return codexSampleResult{}, err
 	}
 	promptPath := filepath.Join(store.RunDir(), "prompt.txt")
 	if err := os.MkdirAll(store.RunDir(), 0o755); err != nil {
-		return err
+		return codexSampleResult{}, err
 	}
 	if err := os.WriteFile(promptPath, []byte(opts.prompt), 0o600); err != nil {
-		return err
+		return codexSampleResult{}, err
 	}
 	manifest.Config["prompt_path"] = promptPath
 	if err := store.WriteManifest(manifest); err != nil {
-		return err
+		return codexSampleResult{}, err
 	}
 
-	server, listener, err := startMeasurementProxy(opts.addr, opts.upstream, opts.outDir, opts.runID, adapter, opts.timeout, opts.apiKey)
+	server, listener, err := startMeasurementProxy(opts.addr, opts.upstream, opts.outDir, runID, adapter, opts.timeout, opts.apiKey)
 	if err != nil {
-		return finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, err)
+		return codexSampleResult{}, finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, err)
 	}
 	proxyURL := "http://" + listener.Addr().String() + "/v1"
 	log.Printf("proxy started: %s -> %s", proxyURL, opts.upstream)
@@ -134,7 +208,7 @@ func runCodex(opts codexOptions) error {
 	result, runErr := codexharness.Run(context.Background(), codexharness.Config{
 		Model:       opts.model,
 		Prompt:      opts.prompt,
-		Workdir:     opts.workdir,
+		Workdir:     workdir,
 		ProxyURL:    proxyURL,
 		ProxyAPIKey: opts.apiKey,
 		Timeout:     opts.codexTimeout,
@@ -149,10 +223,10 @@ func runCodex(opts codexOptions) error {
 		runErr = shutdownErr
 	}
 	if runErr != nil {
-		return finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, runErr)
+		return codexSampleResult{}, finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, runErr)
 	}
 	if !result.Success {
-		return finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, fmt.Errorf("codex exited with code %d: %s", result.ReturnCode, result.Error))
+		return codexSampleResult{}, finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, fmt.Errorf("codex exited with code %d: %s", result.ReturnCode, result.Error))
 	}
 	log.Printf("codex exec completed: return_code=%d wall_ms=%.1f", result.ReturnCode, result.WallMillis)
 
@@ -165,23 +239,28 @@ func runCodex(opts codexOptions) error {
 		log.Printf("usage reconciliation skipped: %v", readErr)
 		records, readErr = metrics.ReadRequestJSONL(store.RequestsPath())
 		if readErr != nil {
-			return finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, readErr)
+			return codexSampleResult{}, finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, readErr)
 		}
 	}
-	runMetrics := metrics.FromRequests(opts.runID, records)
+	runMetrics := metrics.FromRequests(runID, records)
 	runMetrics.Context.CodexWallMillis = result.WallMillis
 	if err := store.WriteMetrics(runMetrics); err != nil {
-		return finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, err)
+		return codexSampleResult{}, finalizeProbeManifest(store, manifest, artifacts.RunStatusFailed, err)
 	}
 	finalManifest, err := finalizedManifest(store, manifest, artifacts.RunStatusDone, nil)
 	if err != nil {
-		return err
+		return codexSampleResult{}, err
 	}
 	if err := store.UpdateIndex(finalManifest, runMetrics); err != nil {
-		return err
+		return codexSampleResult{}, err
 	}
 	log.Printf("artifacts finalized: %s", store.RunDir())
-	fmt.Printf("codex task=%s requests=%d wall_ms=%.1f\n", opts.task, len(records), result.WallMillis)
-	fmt.Printf("run_id=%s artifacts=%s\n", opts.runID, store.RunDir())
-	return nil
+	return codexSampleResult{
+		runID:     runID,
+		runDir:    store.RunDir(),
+		requests:  len(records),
+		wallMs:    result.WallMillis,
+		costUSD:   runMetrics.Comparable.TotalCostUSD,
+		costKnown: runMetrics.Comparable.TotalCostKnown,
+	}, nil
 }

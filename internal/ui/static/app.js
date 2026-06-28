@@ -8,6 +8,8 @@ async function fetchJSON(url) {
 
 const metricHelp = {
   cost: "Sum of router-provided request costs observed inline or by API. If no router cost was present, this is shown as unknown.",
+  ttfb: "Time to first byte: request sent → first response byte from the router (a stream framing event or the start of a buffered body).",
+  ttft: "Time to first token: request sent → first streamed content delta. Streaming only; blank for non-streaming responses.",
   e2e: "Median proxy-measured time from sending the upstream request to receiving the last upstream byte.",
   e2eColumn: "Per-request end-to-end latency, measured at the proxy→router boundary: last_byte − request_sent (time from sending this upstream request to receiving its last upstream byte). It excludes local/agent time spent between requests. For client-canceled streams it ends at the last byte received before cancellation.",
   totalRequest: "Sum of proxy-measured request E2E durations for this run or group.",
@@ -80,31 +82,23 @@ function renderProbes(routers) {
       <div class="panel-head">
         <div>
           <div class="panel-title">${escapeHTML(router.router || "unknown router")}</div>
-          <div class="panel-subtitle">Probe results grouped by workload type and probe.</div>
+          <div class="panel-subtitle">Probe results grouped by probe type.</div>
         </div>
-        ${summaryChips(router.summary)}
+        ${probeRouterChips(router.summary)}
       </div>
-      ${(router.workloads || []).map(renderProbeWorkload).join("")}
+      ${(router.probes || []).map(renderProbeSubgroup).join("")}
     </section>
   `).join("");
   attachRunDetailHandlers();
 }
 
-function renderProbeWorkload(workload) {
-  return `<details class="group">
+function renderProbeSubgroup(probe) {
+  return `<details class="subgroup">
     <summary>
-      <span>${escapeHTML(workload.type || "single")} probes</span>
-      ${inlineSummary(workload.summary)}
+      <span>${escapeHTML(probe.name || "unknown probe")}</span>
+      ${inlineSummary(probe.summary)}
     </summary>
-    ${(workload.probes || []).map((probe) => `
-      <details class="subgroup">
-        <summary>
-          <span>${escapeHTML(probe.name || "unknown probe")}</span>
-          ${inlineSummary(probe.summary)}
-        </summary>
-        ${runCards(probe.runs || [])}
-      </details>
-    `).join("")}
+    ${runCards(probe.runs || [])}
   </details>`;
 }
 
@@ -119,9 +113,8 @@ function renderHarnesses(harnesses) {
       <div class="panel-head">
         <div>
           <div class="panel-title">${escapeHTML(harness.harness || "unknown harness")}</div>
-          <div class="panel-subtitle">Harness results grouped by router and task.</div>
+          <div class="panel-subtitle">Per-router aggregates for this harness. Compare the router rows below.</div>
         </div>
-        ${summaryChips(harness.summary)}
       </div>
       ${(harness.routers || []).map((router) => `
         <details class="group">
@@ -151,6 +144,18 @@ function summaryChips(summary = {}) {
     ${chip("Cost", fmtMoney(summary.total_cost_usd, summary.total_cost_known), metricHelp.cost)}
     ${chip("E2E p50", fmtMS(summary.e2e_p50_ms), metricHelp.e2e)}
     ${chip("Total Request Time", fmtMS(summary.total_request_ms), metricHelp.totalRequest)}
+    ${chip("Request Success", fmtRate(summary.success_rate), metricHelp.success)}
+  </div>`;
+}
+
+// Router-level probe summary deliberately omits E2E p50 and Total Request Time: at this
+// level they blend distinct probe types (e.g. a non-streaming floor probe with a
+// streaming one), which is a misleading signal. Those latency metrics stay on the
+// per-probe-type subgroups and individual run cards, where they aggregate one shape.
+function probeRouterChips(summary = {}) {
+  return `<div class="chips compact">
+    ${chip("Requests", fmtNum(summary.request_count))}
+    ${chip("Cost", fmtMoney(summary.total_cost_usd, summary.total_cost_known), metricHelp.cost)}
     ${chip("Request Success", fmtRate(summary.success_rate), metricHelp.success)}
   </div>`;
 }
@@ -218,7 +223,8 @@ function renderRunDetail(data) {
       ${chip("Output Tokens", fmtNum(context.output_tokens))}
       ${chip("Tool Calls", fmtNum(context.tool_call_count))}
       ${chip("Valid Tool Calls", fmtNum(context.valid_tool_call_count))}
-      ${chip("TTFT p50", fmtMS(comparable.ttft_p50_ms))}
+      ${chip("TTFB p50", fmtMS(comparable.ttfb_p50_ms), metricHelp.ttfb)}
+      ${chip("TTFT p50", fmtMS(comparable.ttft_p50_ms), metricHelp.ttft)}
       ${chip("Total Request Time", fmtMS(comparable.total_request_ms))}
     </div>
     ${Object.entries(requests).map(([probe, rows]) => `
@@ -273,6 +279,7 @@ function requestTable(requests) {
       <td>${escapeHTML(req.endpoint || "—")}</td>
       <td>${escapeHTML(String(req.status_code || "—"))}</td>
       <td class="${success ? "ok" : "bad"}">${success ? "yes" : "no"}</td>
+      <td>${fmtMS(timing.ttfb_ms)}</td>
       <td>${fmtMS(timing.ttft_ms)}</td>
       <td>${fmtMS(timing.e2e_ms)}</td>
       <td>${fmtNum(req.context?.tool_call_count)}</td>
@@ -289,7 +296,8 @@ function requestTable(requests) {
           <th>Endpoint</th>
           <th>Status</th>
           <th>Success</th>
-          <th>TTFT</th>
+          <th>${columnHelp("TTFB", metricHelp.ttfb)}</th>
+          <th>${columnHelp("TTFT", metricHelp.ttft)}</th>
           <th>${columnHelp("E2E", metricHelp.e2eColumn)}</th>
           <th>Tool Calls</th>
           <th>Cost</th>

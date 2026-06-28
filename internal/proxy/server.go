@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -139,7 +140,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	// Stamp the send time at the upstream boundary, immediately before the round
-	// trip, so TTFT/E2E exclude the client->proxy hop and the proxy's own work.
+	// trip, so TTFB/TTFT/E2E exclude the client->proxy hop and the proxy's own work.
 	requestSent := time.Now()
 	resp, err := s.client.Do(upstreamReq)
 	if err != nil {
@@ -160,6 +161,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) error {
 
 	// Parse the copied bytes off the forwarding path — never the live stream.
 	parsed := parseCaptured(resp.Header, r.URL.Path, outcome)
+	outcome.timing.TTFTMillis = streamTTFTMillis(outcome, resp.Header, requestSent)
 
 	if outcome.streamErr != nil {
 		s.recordStreamError(r, startedAt, requestSent, outcome.timing, requestBody.Len(), outcome.responseBytes, resp.StatusCode, resp.Header, requestID, generationID, routerFields, rawPath, parsed, outcome.streamErr)
@@ -208,9 +210,28 @@ type captureOutcome struct {
 	timing         artifacts.RequestTiming
 	responseBytes  int
 	body           []byte // copied response bytes, for out-of-band parsing
+	timeline       []chunkReceipt
 	captureErr     string // raw-capture goroutine error, if any
 	captureDropped bool   // chunks dropped under backpressure to preserve forwarding
 	streamErr      error  // non-nil if the stream ended on a read or client-write error
+}
+
+// chunkReceipt maps a byte offset in the response to when those bytes arrived, so
+// the receipt time of any later-parsed event (e.g. the first token) can be recovered
+// out of band without timestamping on the forwarding path.
+type chunkReceipt struct {
+	endOffset  int
+	atUnixNano int64
+}
+
+// timeAtOffset returns the receipt time of the chunk that delivered the given byte.
+func (o captureOutcome) timeAtOffset(offset int) (int64, bool) {
+	for _, mark := range o.timeline {
+		if mark.endOffset > offset {
+			return mark.atUnixNano, true
+		}
+	}
+	return 0, false
 }
 
 // forwardAndCapture streams the upstream response to the client while teeing a
@@ -245,10 +266,11 @@ func (s *Server) forwardAndCapture(w http.ResponseWriter, body io.Reader, reques
 		if n > 0 {
 			if out.timing.FirstByteUnixNano == 0 {
 				out.timing.FirstByteUnixNano = receipt.UnixNano()
-				out.timing.TTFTMillis = millis(receipt.Sub(requestSent))
+				out.timing.TTFBMillis = millis(receipt.Sub(requestSent))
 			}
 			out.timing.LastByteUnixNano = receipt.UnixNano()
 			out.responseBytes += n
+			out.timeline = append(out.timeline, chunkReceipt{endOffset: out.responseBytes, atUnixNano: receipt.UnixNano()})
 
 			chunk := buf[:n]
 			if _, writeErr := w.Write(chunk); writeErr != nil {
@@ -319,6 +341,7 @@ func (s *Server) recordSuccess(r *http.Request, startedAt time.Time, requestByte
 		Usage:         parsed.Usage,
 		Comparable: artifacts.ComparableMetrics{
 			CostUSD:              parsed.Usage.CostUSD,
+			TTFBMillis:           outcome.timing.TTFBMillis,
 			TTFTMillis:           outcome.timing.TTFTMillis,
 			E2EMillis:            outcome.timing.E2EMillis,
 			OutputTokensPerSec:   outputTokensPerSec(parsed.Usage.OutputTokens, outcome.timing, resp.Header.Get("Content-Type")),
@@ -407,6 +430,7 @@ func (s *Server) recordStreamError(r *http.Request, startedAt time.Time, request
 		Usage:         usage,
 		Comparable: artifacts.ComparableMetrics{
 			CostUSD:              usage.CostUSD,
+			TTFBMillis:           timing.TTFBMillis,
 			TTFTMillis:           timing.TTFTMillis,
 			E2EMillis:            timing.E2EMillis,
 			OutputTokensPerSec:   outputTokensPerSec(usage.OutputTokens, timing, headers.Get("Content-Type")),
@@ -524,6 +548,67 @@ func classifyTransportError(err error) string {
 		return "timeout"
 	}
 	return "transport"
+}
+
+// streamTTFTMillis is time to first token: the receipt time of the first streamed
+// content delta minus request-sent. It is 0 for non-streaming or compressed bodies
+// (whose offsets would not map to the wire) and when no token delta is present.
+func streamTTFTMillis(out captureOutcome, header http.Header, requestSent time.Time) float64 {
+	if !strings.Contains(strings.ToLower(header.Get("Content-Type")), "text/event-stream") {
+		return 0
+	}
+	if header.Get("Content-Encoding") != "" {
+		return 0
+	}
+	offset, ok := firstStreamDeltaOffset(out.body)
+	if !ok {
+		return 0
+	}
+	at, ok := out.timeAtOffset(offset)
+	if !ok {
+		return 0
+	}
+	return millis(time.Unix(0, at).Sub(requestSent))
+}
+
+// firstStreamDeltaOffset returns the byte offset of the first SSE data line carrying a
+// token-bearing delta: any "*.delta" event with a non-empty string "delta" (output
+// text, reasoning, or tool-call argument tokens).
+func firstStreamDeltaOffset(body []byte) (int, bool) {
+	offset := 0
+	for len(body) > 0 {
+		nl := bytes.IndexByte(body, '\n')
+		line := body
+		if nl >= 0 {
+			line = body[:nl]
+		}
+		if data := bytes.TrimSpace(line); bytes.HasPrefix(data, []byte("data:")) {
+			if isStreamTokenDelta(bytes.TrimSpace(data[len("data:"):])) {
+				return offset, true
+			}
+		}
+		if nl < 0 {
+			break
+		}
+		offset += nl + 1
+		body = body[nl+1:]
+	}
+	return 0, false
+}
+
+func isStreamTokenDelta(data []byte) bool {
+	var ev struct {
+		Type  string          `json:"type"`
+		Delta json.RawMessage `json:"delta"`
+	}
+	if err := json.Unmarshal(data, &ev); err != nil {
+		return false
+	}
+	if !strings.HasSuffix(ev.Type, ".delta") {
+		return false
+	}
+	var text string
+	return json.Unmarshal(ev.Delta, &text) == nil && text != ""
 }
 
 func outputTokensPerSec(tokens int, timing artifacts.RequestTiming, contentType string) float64 {
