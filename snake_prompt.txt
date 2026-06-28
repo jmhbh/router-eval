@@ -1,0 +1,17 @@
+Create a fully working, self-contained Snake game as a single HTML file named
+snake.html in the current working directory. Do not create subdirectories or any
+other files.
+
+The file must be complete and runnable by opening it directly in a browser:
+inline ALL CSS and JavaScript, with no external scripts, stylesheets, images,
+fonts, or network requests of any kind.
+
+Game requirements:
+- A square game board rendered on an HTML5 <canvas>.
+- Arrow-key (and WASD) controls to steer the snake.
+- Food spawns on random empty cells; eating it grows the snake and adds to the score.
+- The game ends on collision with a wall or the snake's own body, and shows the
+  final score with a "Press Enter to restart" option.
+- The current score is always visible on screen.
+
+Keep it simple and in one file. When finished, confirm the exact filename you wrote.
