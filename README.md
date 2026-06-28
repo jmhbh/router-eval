@@ -2,6 +2,10 @@
 
 CLI and transparent measurement proxy for capturing LLM router request metrics — cost, latency, and reliability — via synthetic probes and a Codex harness.
 
+<p align="center">
+  <img src="docs/demo.gif" alt="router-eval demo" width="800">
+</p>
+
 ## Prerequisites
 
 - Install the latest CLI release (auto-detects OS/arch): `curl -fsSL https://raw.githubusercontent.com/jmhbh/router-eval/main/install.sh | sh`
