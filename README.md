@@ -12,7 +12,7 @@ aggregators on cost, performance, and reliability while holding the model fixed.
 - An OpenRouter account and API key. For Codex CLI setup background, see:
   https://openrouter.ai/docs/cookbook/coding-agents/codex-cli
 - Codex CLI installed when running the Codex harness.
-- Download the CLI (TODO: provide script here)
+- Install the latest CLI release (auto-detects OS/arch): `curl -fsSL https://raw.githubusercontent.com/jmhbh/router-eval/main/install.sh | sh`
 
 Run the `validate` cmd to ensure necessary environment variables are set.
 
@@ -102,4 +102,4 @@ router-eval reconcile --run-id <RUN_ID> --out out --csv openrouter_activity.csv
 Export the OpenRouter activity CSV for a window that covers the run **in UTC**
 (the dashboard typically filters by local time, while the generation second is
 UTC). A reconciliation summary is written to
-`out/runs/<RUN>/reconciliation/summary.json`.
+`out/runs/<RUN_ID>/reconciliation/summary.json`.
