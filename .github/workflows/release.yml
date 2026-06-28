@@ -41,7 +41,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags="-s -w" -o "dist/router-eval" ./cmd/router-eval
+          go build -trimpath -ldflags="-s -w -X router-eval/internal/cli.version=${{ github.ref_name }}" -o "dist/router-eval" ./cmd/router-eval
           tar -C dist -czf "router-eval-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" router-eval
 
       # Build jobs only produce artifacts; a single downstream job publishes the

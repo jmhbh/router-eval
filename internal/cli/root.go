@@ -34,6 +34,7 @@ func NewRootCommand(opts Options) *cobra.Command {
 		Use:           "router-eval",
 		Short:         "Evaluate hosted LLM routers via a local measurement proxy",
 		Long:          routerEvalBanner + "\n\nEvaluate hosted LLM routers (tokenRouter, OpenRouter) on cost, performance,\nand reliability via a transparent local measurement proxy.",
+		Version:       resolveVersion(),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		CompletionOptions: cobra.CompletionOptions{
@@ -52,6 +53,8 @@ func NewRootCommand(opts Options) *cobra.Command {
 			return cmd.Help()
 		},
 	}
+
+	cmd.SetVersionTemplate("router-eval version {{.Version}}\n")
 
 	cmd.AddCommand(
 		newProbeCommand(),
