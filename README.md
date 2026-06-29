@@ -98,7 +98,7 @@ router-eval codex \
   --sandbox workspace-write \
   --approval never \
   --prompt "$(cat sample_codex_prompts/snake_prompt_easy.txt)" \
-  -- samples 1
+  --samples 1
 ```
 
 The harness creates a temporary `CODEX_HOME` which is cleaned up after every run.
